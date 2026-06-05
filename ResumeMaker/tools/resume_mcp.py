@@ -23,7 +23,7 @@ class ResumeMCPTool:
 
     def get_resume_json(self) -> Dict[str, Any]:
         logger.info("resume_mcp.snapshot module_count=%s", len(self._committed.get("modules", []) or []))
-        return deepcopy(self._committed)
+        return self._resume_payload(self._committed)
 
     def submit_resume_json(self, candidate_resume: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
         guarded, logs = self.validate_resume_patch(self._committed, candidate_resume)
@@ -35,6 +35,15 @@ class ResumeMCPTool:
         self._committed = deepcopy(self._original)
         logger.warning("resume_mcp.rollback")
         return deepcopy(self._committed)
+
+    @staticmethod
+    def _resume_payload(resume: Dict[str, Any]) -> Dict[str, Any]:
+        shaped = ensure_resume_shape(resume)
+        return {
+            "basics": deepcopy(shaped.get("basics", {})),
+            "modules": deepcopy(shaped.get("modules", [])),
+            "style": deepcopy(shaped.get("style", {})),
+        }
 
     @staticmethod
     def validate_resume_patch(
@@ -105,36 +114,49 @@ class ResumeMCPTool:
             return {"items": incoming_items}
 
         if module_type == "custom":
-            fields = current_content.get("fields", [])
+            incoming_fields = incoming_content.get("fields", current_content.get("fields", []))
+            if not isinstance(incoming_fields, list):
+                raise ValueError("MCP submit rejected custom: content.fields must be a list.")
             incoming_highlights = incoming_content.get("highlights", current_content.get("highlights", []))
             if not isinstance(incoming_highlights, list) or not all(isinstance(item, str) for item in incoming_highlights):
                 raise ValueError("MCP submit rejected custom: content.highlights must be a string list.")
             return {
-                "fields": deepcopy(fields if isinstance(fields, list) else []),
+                "fields": deepcopy(incoming_fields),
                 "description": str(incoming_content.get("description", current_content.get("description", "")) or ""),
                 "highlights": incoming_highlights,
             }
 
         current_items = current_content.get("items", [])
         incoming_items = incoming_content.get("items", [])
-        if not isinstance(current_items, list) or not isinstance(incoming_items, list):
+        if not isinstance(incoming_items, list):
             raise ValueError(f"MCP submit rejected {module_type}: content.items must be a list.")
-        if len(incoming_items) != len(current_items):
-            raise ValueError(f"MCP submit rejected {module_type}: cannot add or remove experience items.")
+        if module_type == "education" and (not isinstance(current_items, list) or len(incoming_items) != len(current_items)):
+            raise ValueError(f"MCP submit rejected {module_type}: cannot add or remove education items.")
 
         factual_keys_by_type = {
             "education": {"school", "degree", "major", "startDate", "endDate"},
-            "projects": {"name", "role", "startDate", "endDate"},
-            "companyExperience": {"company", "role", "startDate", "endDate"},
-            "campusExperience": {"organization", "role", "startDate", "endDate"},
         }
         factual_keys = factual_keys_by_type.get(module_type, set())
         guarded_items: List[Dict[str, Any]] = []
 
-        for current_item, incoming_item in zip(current_items, incoming_items):
-            if not isinstance(current_item, dict) or not isinstance(incoming_item, dict):
+        if module_type == "education":
+            item_pairs = zip(current_items, incoming_items)
+        else:
+            item_pairs = [(None, incoming_item) for incoming_item in incoming_items]
+
+        for current_item, incoming_item in item_pairs:
+            if not isinstance(incoming_item, dict):
                 raise ValueError(f"MCP submit rejected {module_type}: items must be JSON objects.")
-            guarded_item = deepcopy(current_item)
+            if module_type != "education":
+                highlights = incoming_item.get("highlights", [])
+                if "highlights" in incoming_item and (
+                    not isinstance(highlights, list) or not all(isinstance(item, str) for item in highlights)
+                ):
+                    raise ValueError(f"MCP submit rejected {module_type}: highlights must be a string list.")
+                guarded_items.append(deepcopy(incoming_item))
+                continue
+
+            guarded_item = deepcopy(current_item) if isinstance(current_item, dict) else {}
             for key, value in incoming_item.items():
                 if key in factual_keys:
                     continue

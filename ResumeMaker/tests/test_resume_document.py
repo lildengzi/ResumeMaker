@@ -1,4 +1,5 @@
 from core.resume_document import create_resume_document, get_resume_document, notify_document_changed, sync_session_aliases
+from core.document_commands import save_document_snapshot
 
 
 def test_document_observer_updates_preview_and_exports():
@@ -103,3 +104,21 @@ def test_sync_session_aliases_does_not_clear_existing_jd_widget_value():
     sync_session_aliases(session_state, include_widget_keys=True)
 
     assert session_state["jd_input"] == "fresh user typed JD"
+
+
+def test_document_snapshot_preserves_input_context():
+    document = create_resume_document(
+        {
+            "basics": {"name": "Alice", "headline": "Math tutor"},
+            "modules": [],
+            "style": {},
+        },
+        {},
+        jd_text="家长需要看教学能力和考试成绩",
+        uploaded_files=[{"name": "grades.md", "type": "readme", "raw_text": "数学成绩优秀"}],
+    )
+
+    snapshot = save_document_snapshot(document)
+
+    assert snapshot["inputs"]["jd_text"] == "家长需要看教学能力和考试成绩"
+    assert snapshot["inputs"]["uploaded_files"][0]["raw_text"] == "数学成绩优秀"

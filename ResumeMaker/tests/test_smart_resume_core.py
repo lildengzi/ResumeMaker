@@ -7,6 +7,7 @@ from core.data import (
     migrate_legacy_resume,
     normalize_list_of_strings,
     save_resume_data,
+    load_resume_data,
 )
 import json
 import pytest
@@ -204,6 +205,36 @@ def test_save_resume_data_does_not_persist_legacy_top_level_sections(tmp_path):
     assert "skills" not in saved
     skills_module = next(module for module in saved["modules"] if module["type"] == "skills")
     assert skills_module["content"]["items"] == ["Python"]
+
+
+def test_save_resume_data_persists_input_context(tmp_path):
+    resume = get_default_resume_data()
+    resume["inputs"] = {
+        "jd_text": "家长希望了解数学家教能力",
+        "uploaded_files": [
+            {
+                "name": "grades.md",
+                "type": "readme",
+                "path": "data/uploads/grades.md",
+                "raw_text": "高考数学 130+，有同学辅导经历。",
+                "parse_status": "ok",
+            }
+        ],
+    }
+    target = "data/parser_test_saved_inputs.json"
+
+    save_resume_data(resume, target)
+    from pathlib import Path
+
+    target_path = Path(target)
+    try:
+        loaded = load_resume_data(target_path)
+    finally:
+        target_path.unlink(missing_ok=True)
+
+    assert loaded["inputs"]["jd_text"] == ""
+    assert loaded["inputs"]["uploaded_files"][0]["name"] == "grades.md"
+    assert "高考数学" in loaded["inputs"]["uploaded_files"][0]["raw_text"]
 
 
 def test_resume_shape_sanitizes_photo_path_and_control_characters():

@@ -19,6 +19,27 @@ DEFAULT_STYLE_CONFIG: Dict[str, Any] = {
     "show_photo": True,
 }
 
+DEFAULT_INPUTS: Dict[str, Any] = {
+    "jd_text": "",
+    "jd_source": "manual",
+    "jd_url_input": "",
+    "jd_ocr_text": "",
+    "uploaded_readme_text": "",
+    "existing_resume_name": "",
+    "uploaded_files": [],
+}
+
+INPUT_TEXT_FIELDS = (
+    "jd_text",
+    "jd_source",
+    "jd_url_input",
+    "jd_ocr_text",
+    "uploaded_readme_text",
+    "existing_resume_name",
+)
+
+PERSISTENT_UPLOAD_TYPES = {"readme", "existing_resume"}
+
 
 CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
@@ -329,6 +350,82 @@ def normalize_module_content(module_type: str, content: Any) -> Dict[str, Any]:
     return _normalize_custom_content(content)
 
 
+def normalize_uploaded_file_meta(file_meta: Any) -> Dict[str, Any] | None:
+    if not isinstance(file_meta, dict):
+        return None
+
+    normalized: Dict[str, Any] = {
+        "name": sanitize_text_value(file_meta.get("name", ""), max_length=300),
+        "original_name": sanitize_text_value(file_meta.get("original_name", ""), max_length=300),
+        "type": sanitize_text_value(file_meta.get("type", ""), max_length=80),
+        "file_type": sanitize_text_value(file_meta.get("file_type", ""), max_length=80),
+        "classification": sanitize_text_value(file_meta.get("classification", ""), max_length=80),
+        "suffix": sanitize_text_value(file_meta.get("suffix", ""), max_length=20),
+        "parse_status": sanitize_text_value(file_meta.get("parse_status", ""), max_length=80),
+        "material_category": sanitize_text_value(file_meta.get("material_category", ""), max_length=80),
+        "material_title": sanitize_text_value(file_meta.get("material_title", ""), max_length=300),
+        "raw_text": sanitize_text_value(file_meta.get("raw_text", ""), max_length=20000),
+    }
+
+    raw_path = sanitize_text_value(file_meta.get("path", ""), max_length=500)
+    if raw_path:
+        try:
+            normalized["path"] = str(ensure_workspace_path(raw_path))
+        except ValueError:
+            normalized["path"] = ""
+    else:
+        normalized["path"] = ""
+
+    try:
+        normalized["size_bytes"] = int(file_meta.get("size_bytes", 0) or 0)
+    except (TypeError, ValueError):
+        normalized["size_bytes"] = 0
+
+    notes = file_meta.get("notes", [])
+    normalized["notes"] = normalize_list_of_strings(notes)[:8] if isinstance(notes, list) else []
+    metadata = file_meta.get("metadata", {})
+    normalized["metadata"] = deepcopy(metadata) if isinstance(metadata, dict) else {}
+
+    if not normalized["name"] and normalized["original_name"]:
+        normalized["name"] = normalized["original_name"]
+    if not normalized["original_name"] and normalized["name"]:
+        normalized["original_name"] = normalized["name"]
+    return normalized if normalized["name"] or normalized["path"] or normalized["raw_text"] else None
+
+
+def normalize_inputs(inputs: Any) -> Dict[str, Any]:
+    normalized = deepcopy(DEFAULT_INPUTS)
+    if not isinstance(inputs, dict):
+        return normalized
+
+    for key in INPUT_TEXT_FIELDS:
+        normalized[key] = sanitize_text_value(inputs.get(key, normalized.get(key, "")), max_length=20000)
+
+    files = []
+    raw_files = inputs.get("uploaded_files", [])
+    if isinstance(raw_files, list):
+        for file_meta in raw_files:
+            normalized_file = normalize_uploaded_file_meta(file_meta)
+            if normalized_file is not None:
+                files.append(normalized_file)
+    normalized["uploaded_files"] = files
+    return normalized
+
+
+def normalize_persistent_inputs(inputs: Any) -> Dict[str, Any]:
+    normalized = normalize_inputs(inputs)
+    persisted_files = [
+        file_meta
+        for file_meta in normalized.get("uploaded_files", [])
+        if file_meta.get("type") in PERSISTENT_UPLOAD_TYPES
+    ]
+    return {
+        "uploaded_readme_text": normalized.get("uploaded_readme_text", ""),
+        "existing_resume_name": normalized.get("existing_resume_name", ""),
+        "uploaded_files": persisted_files,
+    }
+
+
 def _has_section_content(items: Any) -> bool:
     if not isinstance(items, list):
         return False
@@ -471,6 +568,8 @@ def migrate_legacy_resume(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             "modules": modules,
             "style": style,
         }
+        if "inputs" in data:
+            result["inputs"] = normalize_inputs(data.get("inputs", {}))
         return result
 
     modules = [
@@ -523,6 +622,8 @@ def migrate_legacy_resume(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "modules": modules,
         "style": style,
     }
+    if "inputs" in data:
+        result["inputs"] = normalize_inputs(data.get("inputs", {}))
     return result
 
 
@@ -563,6 +664,8 @@ def ensure_modular_resume_shape(data: Optional[Dict[str, Any]]) -> Dict[str, Any
         "modules": normalized_modules,
         "style": style,
     }
+    if "inputs" in migrated:
+        normalized["inputs"] = normalize_inputs(migrated.get("inputs", {}))
     return normalized
 
 
@@ -570,23 +673,31 @@ def ensure_resume_shape(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return ensure_modular_resume_shape(data)
 
 
-def load_resume_data(file_path: Path = RESUME_DATA_FILE) -> Dict[str, Any]:
-    if not file_path.exists():
+def _is_default_resume_path(file_path: Path | str) -> bool:
+    try:
+        return ensure_workspace_path(file_path) == ensure_workspace_path(RESUME_DATA_FILE)
+    except ValueError:
+        return False
+
+
+def _load_resume_data_json(file_path: Path | str = RESUME_DATA_FILE) -> Dict[str, Any]:
+    safe_path = ensure_workspace_path(file_path)
+    if not safe_path.exists():
         data = get_default_resume_data()
-        save_resume_data(data, file_path)
+        _save_resume_data_json(data, safe_path)
         return data
 
     try:
-        with file_path.open("r", encoding="utf-8") as file:
+        with safe_path.open("r", encoding="utf-8") as file:
             data = json.load(file)
         return ensure_resume_shape(data)
     except (json.JSONDecodeError, OSError):
         data = get_default_resume_data()
-        save_resume_data(data, file_path)
+        _save_resume_data_json(data, safe_path)
         return data
 
 
-def save_resume_data(data: Dict[str, Any], file_path: Path = RESUME_DATA_FILE) -> None:
+def _save_resume_data_json(data: Dict[str, Any], file_path: Path | str = RESUME_DATA_FILE) -> None:
     safe_path = ensure_workspace_path(file_path)
     shaped = ensure_resume_shape(data)
     normalized = {
@@ -594,9 +705,37 @@ def save_resume_data(data: Dict[str, Any], file_path: Path = RESUME_DATA_FILE) -
         "modules": deepcopy(shaped.get("modules", [])),
         "style": deepcopy(shaped.get("style", {})),
     }
+    input_source = data.get("inputs", shaped.get("inputs", {})) if isinstance(data, dict) else {}
+    if input_source:
+        normalized["inputs"] = normalize_persistent_inputs(input_source)
     safe_path.parent.mkdir(parents=True, exist_ok=True)
     with safe_path.open("w", encoding="utf-8") as file:
         json.dump(normalized, file, ensure_ascii=False, indent=2)
+
+
+def load_resume_data(file_path: Path = RESUME_DATA_FILE) -> Dict[str, Any]:
+    if _is_default_resume_path(file_path):
+        try:
+            from core.storage import load_workspace
+
+            return load_workspace(legacy_resume_path=RESUME_DATA_FILE)
+        except Exception:
+            return _load_resume_data_json(file_path)
+    return _load_resume_data_json(file_path)
+
+
+def save_resume_data(data: Dict[str, Any], file_path: Path = RESUME_DATA_FILE) -> None:
+    if _is_default_resume_path(file_path):
+        try:
+            from core.storage import save_workspace
+
+            stored = save_workspace(data)
+            _save_resume_data_json(stored, file_path)
+            return
+        except Exception:
+            _save_resume_data_json(data, file_path)
+            return
+    _save_resume_data_json(data, file_path)
 
 
 def merge_resume(original: Dict[str, Any], optimized: Dict[str, Any]) -> Dict[str, Any]:

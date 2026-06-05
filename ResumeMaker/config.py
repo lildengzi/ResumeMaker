@@ -11,12 +11,15 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = BASE_DIR / "config.json"
 DEFAULT_ENV_PATH = BASE_DIR / ".env"
 
-load_dotenv(DEFAULT_ENV_PATH, override=True)
+if "PYTEST_VERSION" not in os.environ:
+    load_dotenv(DEFAULT_ENV_PATH, override=True)
 
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "storage": {
         "resume_data_file": "resume_data.json",
+        "database_file": "app.db",
+        "asset_dir": "assets",
         "upload_dir": "uploads",
     },
     "llm": {
@@ -28,8 +31,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "timeout_env": "LLM_TIMEOUT",
         "max_retries_env": "LLM_MAX_RETRIES",
         "temperature": 0.2,
-        "timeout": 60,
-        "max_retries": 1,
+        "timeout": 12,
+        "max_retries": 0,
     },
     "workflow": {
         "max_history": 3,
@@ -182,7 +185,8 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 
 
 def load_app_config(config_path: Path = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
-    load_dotenv(DEFAULT_ENV_PATH, override=True)
+    if "PYTEST_VERSION" not in os.environ:
+        load_dotenv(DEFAULT_ENV_PATH, override=True)
     config = deepcopy(DEFAULT_CONFIG)
     if config_path.exists():
         with config_path.open("r", encoding="utf-8") as file:
@@ -221,14 +225,14 @@ def load_app_config(config_path: Path = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
         try:
             llm_config["timeout"] = float(timeout)
         except ValueError:
-            llm_config["timeout"] = llm_config.get("timeout", 60)
+            llm_config["timeout"] = llm_config.get("timeout", 12)
 
     max_retries = os.getenv(max_retries_env)
     if max_retries:
         try:
             llm_config["max_retries"] = int(max_retries)
         except ValueError:
-            llm_config["max_retries"] = llm_config.get("max_retries", 1)
+            llm_config["max_retries"] = llm_config.get("max_retries", 0)
 
     return config
 

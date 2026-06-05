@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from uuid import uuid4
 
 import streamlit as st
 
@@ -157,7 +158,7 @@ def render_style_controls() -> Dict[str, Any]:
 
 def _save_uploaded_file(upload_dir: Path, uploaded_file, target_prefix: str) -> str:
     ext = Path(uploaded_file.name).suffix
-    target_path = upload_dir / f"{target_prefix}{ext}"
+    target_path = upload_dir / f"{target_prefix}_{uuid4().hex[:8]}{ext}"
     target_path.write_bytes(uploaded_file.getbuffer())
     return str(target_path)
 
@@ -200,7 +201,27 @@ def _parse_saved_upload(file_path: str, original_name: str, file_role: str) -> D
     return parsed
 
 
-def render_jd_and_file_controls(upload_dir: Path) -> Tuple[str, List[Dict[str, Any]]]:
+def _material_files() -> List[Dict[str, Any]]:
+    return [
+        file_meta
+        for file_meta in st.session_state.get("uploaded_files_meta", [])
+        if isinstance(file_meta, dict) and file_meta.get("type") == "readme"
+    ]
+
+
+def _non_material_files() -> List[Dict[str, Any]]:
+    return [
+        file_meta
+        for file_meta in st.session_state.get("uploaded_files_meta", [])
+        if isinstance(file_meta, dict) and file_meta.get("type") != "readme"
+    ]
+
+
+def _persist_material_files(materials: List[Dict[str, Any]]) -> None:
+    st.session_state.uploaded_files_meta = _non_material_files() + materials
+
+
+def render_jd_controls(upload_dir: Path) -> str:
     ensure_upload_state()
 
     collected_files: List[Dict[str, Any]] = []
@@ -278,37 +299,92 @@ def render_jd_and_file_controls(upload_dir: Path) -> Tuple[str, List[Dict[str, A
                 placeholder=t("jd.ocr_placeholder"),
             )
 
-    with st.expander(t("file.section"), expanded=False):
+    if collected_files:
+        cached_without_jd_images = [
+            file_meta
+            for file_meta in st.session_state.get("uploaded_files_meta", [])
+            if isinstance(file_meta, dict) and file_meta.get("type") != "jd_image"
+        ]
+        st.session_state.uploaded_files_meta = cached_without_jd_images + collected_files
+
+    return st.session_state.get("jd_input", "")
+
+
+def render_material_controls(upload_dir: Path) -> List[Dict[str, Any]]:
+    ensure_upload_state()
+
+    with st.expander(t("file.section"), expanded=True):
         uploaded_readme = st.file_uploader(
             t("file.readme"),
-            type=["md", "txt"],
+            type=["docx", "md", "json"],
             key="readme_uploader",
         )
         if uploaded_readme is not None:
-            file_path = _save_uploaded_file(upload_dir, uploaded_readme, "project_readme")
+            file_path = _save_uploaded_file(upload_dir, uploaded_readme, "candidate_material")
             parsed_readme = _parse_saved_upload(file_path, uploaded_readme.name, "readme")
+            parsed_readme.setdefault("material_category", "project")
+            parsed_readme.setdefault("material_title", Path(uploaded_readme.name).stem)
             st.session_state.uploaded_readme_text = parsed_readme.get("raw_text", "")
-            collected_files.append(parsed_readme)
+            materials = _material_files()
+            if not any(item.get("path") == parsed_readme.get("path") for item in materials):
+                materials.append(parsed_readme)
+                _persist_material_files(materials)
             st.success(t("file.readme_uploaded"))
 
-        existing_resume = st.file_uploader(
-            t("file.existing_resume"),
-            type=["pdf", "md", "txt"],
-            key="existing_resume_uploader",
-        )
-        if existing_resume is not None:
-            file_path = _save_uploaded_file(upload_dir, existing_resume, "existing_resume")
-            st.session_state.existing_resume_name = existing_resume.name
-            collected_files.append(_parse_saved_upload(file_path, existing_resume.name, "existing_resume"))
-            st.success(t("file.existing_resume_saved"))
+        materials = _material_files()
+        if not materials:
+            st.info(t("material.empty"))
+        else:
+            st.caption(t("material.cached"))
 
-        if collected_files:
-            st.session_state.uploaded_files_meta = collected_files
+        for idx, file_meta in enumerate(materials):
+            title = file_meta.get("material_title") or file_meta.get("name") or t("material.untitled")
+            with st.expander(str(title), expanded=False):
+                file_meta["material_title"] = st.text_input(
+                    t("material.title"),
+                    str(file_meta.get("material_title") or Path(str(file_meta.get("name", ""))).stem),
+                    key=f"material_title_{idx}_{file_meta.get('path', '')}",
+                )
+                file_meta["material_category"] = st.selectbox(
+                    t("material.category"),
+                    options=["project", "teaching", "grade", "certificate", "other"],
+                    format_func=lambda option: t(f"material.category.{option}"),
+                    index=["project", "teaching", "grade", "certificate", "other"].index(
+                        str(file_meta.get("material_category") or "project")
+                        if str(file_meta.get("material_category") or "project") in {"project", "teaching", "grade", "certificate", "other"}
+                        else "project"
+                    ),
+                    key=f"material_category_{idx}_{file_meta.get('path', '')}",
+                )
+                st.caption(
+                    t(
+                        "material.meta",
+                        name=file_meta.get("name", ""),
+                        status=file_meta.get("parse_status", ""),
+                    )
+                )
+                file_meta["raw_text"] = st.text_area(
+                    t("material.content"),
+                    str(file_meta.get("raw_text", "") or ""),
+                    height=180,
+                    key=f"material_content_{idx}_{file_meta.get('path', '')}",
+                )
+                col_save, col_delete = st.columns(2)
+                with col_save:
+                    if st.button(t("material.save"), key=f"material_save_{idx}", use_container_width=True):
+                        materials[idx] = file_meta
+                        _persist_material_files(materials)
+                        st.success(t("material.saved"))
+                with col_delete:
+                    if st.button(t("material.delete"), key=f"material_delete_{idx}", use_container_width=True):
+                        materials.pop(idx)
+                        _persist_material_files(materials)
+                        st.rerun()
 
-        cached_files = st.session_state.get("uploaded_files_meta", [])
-        if cached_files:
-            st.caption(t("file.cached"))
-            for file_meta in cached_files:
-                st.write(f"- {file_meta.get('type', 'file')}: {file_meta.get('name', '')}")
+    return st.session_state.get("uploaded_files_meta", [])
 
-    return st.session_state.get("jd_input", ""), st.session_state.get("uploaded_files_meta", [])
+
+def render_jd_and_file_controls(upload_dir: Path) -> Tuple[str, List[Dict[str, Any]]]:
+    jd_input = render_jd_controls(upload_dir)
+    uploaded_files = render_material_controls(upload_dir)
+    return jd_input, uploaded_files

@@ -17,12 +17,20 @@ from .data import (
 )
 from .llm import create_llm, extract_json_block
 from .markdown import format_contact_line, render_markdown
-from .service import build_local_resume_draft, import_existing_resume, optimize_resume_by_jd, run_resume_workflow
+from .service import (
+    build_local_resume_draft,
+    build_resume_discussion_prompt,
+    discuss_resume_with_ai,
+    import_existing_resume,
+    optimize_resume_by_jd,
+    run_resume_workflow,
+)
 
 __all__ = [
     "DEFAULT_STYLE_CONFIG",
     "ModuleFactory",
     "build_local_resume_draft",
+    "build_resume_discussion_prompt",
     "create_generic_module",
     "create_llm",
     "create_module",
@@ -34,6 +42,7 @@ __all__ = [
     "get_default_resume_data",
     "get_photo_bytes",
     "get_photo_data_uri",
+    "discuss_resume_with_ai",
     "import_existing_resume",
     "load_resume_data",
     "merge_resume",

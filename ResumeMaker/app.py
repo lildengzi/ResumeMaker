@@ -9,8 +9,8 @@ import streamlit as st
 from config import APP_CONFIG, get_path_from_storage, update_resume_style_config
 from core import (
     create_generic_module,
+    discuss_resume_with_ai,
     get_photo_data_uri,
-    import_existing_resume,
     load_resume_data,
     normalize_list_of_strings,
     run_resume_workflow,
@@ -25,6 +25,7 @@ from core.document_commands import (
     update_basics,
     update_module,
 )
+from core.logging_config import get_logger
 from core.resume_document import (
     create_resume_document,
     get_document_exports,
@@ -36,11 +37,18 @@ from core.resume_document import (
 from renderers import render_resume_document_pdf, render_resume_markdown
 from ui.i18n import ensure_language_state, render_language_selector, t
 from ui.preview import render_resume_preview
-from ui.sidebar import ensure_style_state, get_current_style_params, render_jd_and_file_controls, render_style_controls
+from ui.sidebar import (
+    ensure_style_state,
+    get_current_style_params,
+    render_jd_controls,
+    render_material_controls,
+    render_style_controls,
+)
 
 
 UPLOAD_DIR = get_path_from_storage("upload_dir")
 UPLOAD_DIR.mkdir(exist_ok=True)
+logger = get_logger(__name__)
 
 PREVIEW_CONFIG = APP_CONFIG["preview"]
 RESUME_CONFIG = APP_CONFIG["resume"]
@@ -51,8 +59,16 @@ def init_state() -> None:
     if "resume_data" not in st.session_state:
         st.session_state.resume_data = load_resume_data()
         _renumber_modules()
+    saved_inputs = st.session_state.resume_data.get("inputs", {})
+    if not isinstance(saved_inputs, dict):
+        saved_inputs = {}
     if "jd_input" not in st.session_state:
-        st.session_state.jd_input = ""
+        st.session_state.jd_input = str(saved_inputs.get("jd_text", "") or "")
+    if "uploaded_files_meta" not in st.session_state:
+        st.session_state.uploaded_files_meta = deepcopy(saved_inputs.get("uploaded_files", []) or [])
+    for input_key in ["jd_source", "jd_url_input", "jd_ocr_text", "uploaded_readme_text", "existing_resume_name"]:
+        if input_key not in st.session_state and input_key in saved_inputs:
+            st.session_state[input_key] = saved_inputs.get(input_key, "")
     ensure_style_state()
     if "resume_document" not in st.session_state:
         st.session_state.resume_document = create_resume_document(
@@ -86,6 +102,14 @@ def init_state() -> None:
         st.session_state.ai_success_message = ""
     if "ai_is_running" not in st.session_state:
         st.session_state.ai_is_running = False
+    if "advisor_messages" not in st.session_state:
+        st.session_state.advisor_messages = []
+    if "advisor_question" not in st.session_state:
+        st.session_state.advisor_question = ""
+    if "advisor_input_version" not in st.session_state:
+        st.session_state.advisor_input_version = 0
+    if "advisor_is_running" not in st.session_state:
+        st.session_state.advisor_is_running = False
     if "last_optimization_signature" not in st.session_state:
         st.session_state.last_optimization_signature = ""
     if "last_optimization_notice" not in st.session_state:
@@ -100,6 +124,15 @@ def persist_resume() -> None:
     snapshot = save_document_snapshot(document)
     save_resume_data(snapshot)
     sync_session_aliases(st.session_state)
+
+
+def persist_input_context_if_changed() -> None:
+    document = get_resume_document(st.session_state)
+    inputs = deepcopy(document.get("inputs", {}))
+    if st.session_state.resume_data.get("inputs", {}) == inputs:
+        return
+    st.session_state.resume_data["inputs"] = inputs
+    save_resume_data(st.session_state.resume_data)
 
 
 def persist_style_config() -> None:
@@ -161,6 +194,19 @@ def has_minimum_resume_info() -> bool:
 def has_uploaded_existing_resume() -> bool:
     for file_meta in st.session_state.get("uploaded_files_meta", []) or []:
         if isinstance(file_meta, dict) and str(file_meta.get("type", "") or "") == "existing_resume":
+            return True
+    return False
+
+
+def has_uploaded_candidate_material() -> bool:
+    for file_meta in st.session_state.get("uploaded_files_meta", []) or []:
+        if not isinstance(file_meta, dict):
+            continue
+        file_type = str(file_meta.get("type", "") or "")
+        if file_type in {"existing_resume", "readme"} and (
+            str(file_meta.get("raw_text", "") or "").strip()
+            or str(file_meta.get("path", "") or "").strip()
+        ):
             return True
     return False
 
@@ -543,7 +589,7 @@ def render_module_editor(module: Dict[str, Any], index: int, total: int) -> None
     title = str(module.get("title", t("module.fallback_title")) or t("module.fallback_title"))
     module_type = str(module.get("type", "custom"))
 
-    with st.container(border=True):
+    with st.container():
         header_col, visible_col = st.columns([3, 1])
         with header_col:
             updated_title = st.text_input(
@@ -598,7 +644,7 @@ def render_module_editor(module: Dict[str, Any], index: int, total: int) -> None
     
     
 def render_modules_editor() -> None:
-    with st.expander(t("module.section"), expanded=get_expander_default_state("modules", False)):
+    with st.expander(t("module.section"), expanded=get_expander_default_state("modules", True)):
         st.caption(t("module.caption"))
         if st.button(t("module.add"), key="add_module_btn", use_container_width=True):
             _add_module()
@@ -626,7 +672,7 @@ def run_ai_optimization() -> None:
     document.setdefault("inputs", {})["jd_text"] = jd_text
     document["inputs"]["uploaded_files"] = deepcopy(uploaded_files)
 
-    if not has_minimum_resume_info() and not has_uploaded_existing_resume():
+    if not has_minimum_resume_info() and not has_uploaded_candidate_material():
         st.warning(t("ai.minimum_info_warning"))
         return
 
@@ -698,6 +744,16 @@ def run_ai_optimization() -> None:
         runtime = document.setdefault("runtime", {})
         runtime["workflow_logs"] = workflow_logs
         runtime["conditional_suggestions"] = workflow_result.get("conditional_suggestions", [])
+        try:
+            from core.storage import save_workflow_logs
+
+            save_workflow_logs(
+                workflow_logs,
+                jd_text=jd_text,
+                input_signature=current_signature,
+            )
+        except Exception as exc:
+            logger.warning("app.run_ai_optimization save_workflow_logs failed error=%s", exc)
         persist_resume()
         refresh_preview(force=True)
         st.session_state.last_optimization_signature = current_signature
@@ -718,39 +774,76 @@ def run_ai_optimization() -> None:
         st.session_state.ai_is_running = False
 
 
-def import_existing_resume_to_document() -> None:
-    uploaded_files = st.session_state.get("uploaded_files_meta", [])
-    if not has_uploaded_existing_resume():
-        st.warning(t("import.no_existing_resume"))
-        return
+def render_ai_advisor() -> None:
+    with st.expander(t("advisor.section"), expanded=get_expander_default_state("advisor", False)):
+        st.caption(t("advisor.caption"))
+        messages = st.session_state.get("advisor_messages", [])
+        if messages:
+            for item in messages[-6:]:
+                role = str(item.get("role", "") or "")
+                content = str(item.get("content", "") or "")
+                if not content:
+                    continue
+                label = t("advisor.user") if role == "user" else t("advisor.assistant")
+                st.markdown(f"**{label}**")
+                st.markdown(content)
+        else:
+            st.info(t("advisor.empty"))
 
-    document = get_resume_document(st.session_state)
-    st.session_state.last_resume_snapshot = deepcopy(st.session_state.resume_data)
-
-    with st.spinner(t("import.spinner")):
-        import_result = import_existing_resume(
-            current_resume=st.session_state.resume_data,
-            uploaded_files=uploaded_files,
+        question = st.text_area(
+            t("advisor.question"),
+            value=st.session_state.get("advisor_question", ""),
+            placeholder=t("advisor.placeholder"),
+            height=100,
+            key=f"advisor_question_input_{st.session_state.get('advisor_input_version', 0)}",
         )
+        st.session_state.advisor_question = question
 
-    imported_resume = import_result["final_resume"]
-    st.session_state.resume_data = imported_resume
-    replace_resume_from_agent(document, imported_resume)
-    bump_editor_version()
-    document.setdefault("inputs", {})["uploaded_files"] = deepcopy(uploaded_files)
-    st.session_state.uploaded_files_meta = deepcopy(uploaded_files)
-    runtime = document.setdefault("runtime", {})
-    runtime["workflow_logs"] = import_result.get("workflow_logs", [])
-    runtime["conditional_suggestions"] = []
-    persist_resume()
-    refresh_preview(force=True)
-    st.session_state.last_optimization_signature = ""
-    changes = import_result.get("parsed_resume_changes", [])
-    if changes:
-        st.success(t("import.success", count=len(changes)))
-    else:
-        st.warning(t("import.no_changes"))
-    st.rerun()
+        col_send, col_clear = st.columns(2)
+        with col_send:
+            send_clicked = st.button(
+                t("advisor.send"),
+                use_container_width=True,
+                disabled=bool(st.session_state.get("advisor_is_running", False)),
+            )
+        with col_clear:
+            if st.button(t("advisor.clear"), use_container_width=True):
+                st.session_state.advisor_messages = []
+                st.session_state.advisor_question = ""
+                st.session_state.advisor_input_version += 1
+                st.rerun()
+
+        if not send_clicked:
+            return
+
+        question = str(question or "").strip()
+        if not question:
+            st.warning(t("advisor.empty_question"))
+            return
+
+        st.session_state.advisor_is_running = True
+        try:
+            history = deepcopy(st.session_state.get("advisor_messages", []))
+            st.session_state.advisor_messages = history + [{"role": "user", "content": question}]
+            with st.spinner(t("advisor.spinner")):
+                result = discuss_resume_with_ai(
+                    question=question,
+                    current_resume=st.session_state.resume_data,
+                    target_context=st.session_state.get("jd_input", ""),
+                    uploaded_files=st.session_state.get("uploaded_files_meta", []),
+                    chat_history=history,
+                )
+            answer = str(result.get("answer", "") or "").strip() or t("advisor.no_answer")
+            st.session_state.advisor_messages.append({"role": "assistant", "content": answer})
+            st.session_state.advisor_question = ""
+            st.session_state.advisor_input_version += 1
+            if result.get("error"):
+                st.warning(t("advisor.fallback_notice"))
+            st.rerun()
+        except Exception as exc:
+            st.error(t("advisor.error", error_message=str(exc)))
+        finally:
+            st.session_state.advisor_is_running = False
 
 
 def undo_last_optimization() -> None:
@@ -806,15 +899,10 @@ def render_sidebar() -> None:
         render_style_controls()
         render_basics_editor()
         render_modules_editor()
-        render_jd_and_file_controls(UPLOAD_DIR)
+        render_jd_controls(UPLOAD_DIR)
         notify_document_changed(st.session_state)
-
-        if st.button(
-            t("import.existing_resume"),
-            use_container_width=True,
-            disabled=not has_uploaded_existing_resume(),
-        ):
-            import_existing_resume_to_document()
+        persist_input_context_if_changed()
+        render_ai_advisor()
 
         st.caption(t("sidebar.min_info_tip"))
 
@@ -852,7 +940,7 @@ def render_sidebar() -> None:
     notify_document_changed(st.session_state)
 
 
-def render_main_panel() -> None:
+def render_resume_tab() -> None:
     current_scale = int(st.session_state.get("preview_scale", 100))
     action_col1, action_col2 = st.columns([2, 2])
     with action_col1:
@@ -891,10 +979,65 @@ def render_main_panel() -> None:
         resume_data=get_resume_document(st.session_state)["resume"],
         style_params=get_current_style_params(),
         preview_version=get_document_runtime(st.session_state).get("preview_version", 0),
-        workflow_logs=get_document_runtime(st.session_state).get("workflow_logs", []),
+        workflow_logs=[],
         preview_html=get_document_runtime(st.session_state).get("preview_html", ""),
         conditional_suggestions=get_document_runtime(st.session_state).get("conditional_suggestions", []),
     )
+
+
+def render_materials_tab() -> None:
+    render_material_controls(UPLOAD_DIR)
+    notify_document_changed(st.session_state)
+    persist_input_context_if_changed()
+
+
+def _format_workflow_log_message(log: Dict[str, Any]) -> str:
+    message_key = str(log.get("message_key", "") or "")
+    message_args = log.get("message_args", {})
+    if message_key:
+        if not isinstance(message_args, dict):
+            message_args = {}
+        return t(message_key, **message_args)
+    return str(log.get("message", "") or "")
+
+
+def _format_workflow_log_details(log: Dict[str, Any]) -> List[str]:
+    details = log.get("details", [])
+    if isinstance(details, str):
+        details = [details]
+    if not isinstance(details, list):
+        return []
+    return [str(item).strip() for item in details if str(item).strip()]
+
+
+def render_workflow_logs_tab() -> None:
+    logs = get_document_runtime(st.session_state).get("workflow_logs", [])
+    if not logs:
+        st.info(t("workflow.empty"))
+        return
+
+    st.caption(t("workflow.caption", count=len(logs)))
+    for idx, log in enumerate(logs, start=1):
+        if not isinstance(log, dict):
+            continue
+        agent = str(log.get("agent", "workflow") or "workflow")
+        with st.expander(f"{idx}. {agent}", expanded=True):
+            st.write(_format_workflow_log_message(log))
+            for detail in _format_workflow_log_details(log):
+                st.caption(detail)
+            st.json(log, expanded=False)
+
+
+def render_main_panel() -> None:
+    resume_tab, materials_tab, workflow_tab = st.tabs(
+        [t("tab.resume"), t("tab.materials"), t("tab.workflow")]
+    )
+    with resume_tab:
+        render_resume_tab()
+    with materials_tab:
+        render_materials_tab()
+    with workflow_tab:
+        render_workflow_logs_tab()
 
 
 def main() -> None:

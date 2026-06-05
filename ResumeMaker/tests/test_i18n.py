@@ -27,6 +27,8 @@ def test_i18n_keys_are_ascii_and_translations_are_real_utf8():
 def test_important_sidebar_and_jd_labels_are_bilingual():
     assert TEXT["zh"]["sidebar.generate"] == "✨ 智能生成简历"
     assert TEXT["en"]["sidebar.generate"] == "✨ Generate resume"
+    assert TEXT["zh"]["advisor.section"] == "AI 讨论与材料顾问"
+    assert TEXT["en"]["advisor.section"] == "AI discussion and material advisor"
     assert TEXT["zh"]["jd.source"] == "JD 来源"
     assert TEXT["en"]["jd.source"] == "JD source"
     assert TEXT["zh"]["jd.manual_input"] == "手动输入"
@@ -35,8 +37,8 @@ def test_important_sidebar_and_jd_labels_are_bilingual():
     assert TEXT["en"]["jd.run_ocr"] == "Run OCR"
     assert TEXT["zh"]["jd.fetch_url"] == "抓取 JD 网页"
     assert TEXT["en"]["jd.fetch_url"] == "Fetch URL"
-    assert TEXT["zh"]["file.existing_resume"] == "已有简历 (PDF/Markdown)"
-    assert TEXT["en"]["file.existing_resume"] == "Existing resume (PDF/Markdown)"
+    assert TEXT["zh"]["file.existing_resume"] == "已有简历 / 个人材料 (PDF/Markdown)"
+    assert TEXT["en"]["file.existing_resume"] == "Existing resume / personal materials (PDF/Markdown)"
 
 
 def test_module_editor_labels_are_bilingual():

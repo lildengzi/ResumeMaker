@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from copy import deepcopy
 
@@ -167,6 +167,31 @@ def test_resume_writer_prompt_includes_jd_and_uploaded_resume_context():
     ]
 
 
+def test_resume_writer_prompt_includes_supplemental_materials_for_general_scenarios():
+    resume = get_default_resume_data()
+    llm = CapturingLLM(content='{"basics":{},"modules":[],"style":{}}')
+    agent = ResumeWriterAgent(llm=llm, config={"workflow": {"fallback_to_local_draft": False}, "prompts": {}})
+
+    agent.run(
+        {
+            "current_resume": resume,
+            "jd_text": "家长希望了解数学家教能力、考试成绩和沟通耐心。",
+            "collected_facts": {
+                "optimization_goal": "jd_targeted",
+                "supplemental_context": {
+                    "text": "高考数学 130+，曾辅导初中学生整理错题并制定复习计划。"
+                },
+            },
+            "workflow_logs": [],
+        }
+    )
+
+    prompt = llm.prompts[0]
+    assert "tutoring" in prompt
+    assert "高考数学 130+" in prompt
+    assert "teaching cases" in prompt
+
+
 def test_resume_writer_accepts_conditional_suggestions_without_writing_them_into_resume():
     resume = get_default_resume_data()
     project_module = next(module for module in resume["modules"] if module["type"] == "projects")
@@ -204,7 +229,7 @@ def test_resume_writer_accepts_conditional_suggestions_without_writing_them_into
     assert "补充 ResumeMaker 导出成功率" not in project_text
 
 
-def test_resume_writer_preserves_basics_and_experience_fact_anchors():
+def test_resume_writer_preserves_basics_while_allowing_experience_rewrite():
     resume = get_default_resume_data()
     resume["basics"]["name"] = "Candidate"
     resume["basics"]["email"] = "candidate@example.com"
@@ -237,10 +262,10 @@ def test_resume_writer_preserves_basics_and_experience_fact_anchors():
     assert final_resume["basics"]["email"] == "candidate@example.com"
     guarded_project = next(module for module in final_resume["modules"] if module["type"] == "projects")
     item = guarded_project["content"]["items"][0]
-    assert item["name"] == "ResumeMaker"
-    assert item["role"] == "Backend Developer"
-    assert item["startDate"] == "2025.01"
-    assert item["endDate"] == "2025.03"
+    assert item["name"] == "Invented Project"
+    assert item["role"] == "Tech Lead"
+    assert item["startDate"] == "2026.01"
+    assert item["endDate"] == "2026.12"
     assert item["description"] == "Built reliable export flow."
     assert item["highlights"] == ["Improved export reliability"]
 
@@ -265,7 +290,7 @@ def test_resume_writer_rejects_invented_module_and_falls_back_to_current_resume(
     assert result["workflow_logs"][-1]["details"][0].startswith("LLM output rejected:")
 
 
-def test_resume_writer_preserves_custom_fields_while_polishing_description():
+def test_resume_writer_allows_custom_fields_to_be_rewritten_for_target_audience():
     resume = get_default_resume_data()
     resume["modules"] = [
         {
@@ -295,7 +320,7 @@ def test_resume_writer_preserves_custom_fields_while_polishing_description():
     result = agent.run({"current_resume": resume, "jd_text": "", "workflow_logs": []})
 
     custom_module = result["final_resume"]["modules"][0]
-    assert custom_module["content"]["fields"] == [{"label": "General subfield", "value": "Hackathon finalist"}]
+    assert custom_module["content"]["fields"] == [{"label": "General subfield", "value": "Invented winner"}]
     assert custom_module["content"]["description"] == "Delivered a functional prototype under time constraints."
     assert custom_module["content"]["highlights"] == ["Cross-functional collaboration"]
 
@@ -375,8 +400,8 @@ def test_existing_resume_parser_uses_llm_structured_extraction_before_rule_fallb
     resume = get_default_resume_data()
     llm = CapturingLLM(
         content=(
-            '{"basics":{"name":"Deng Zixuan","headline":"Backend Intern","phone":"2025.01-2025.03",'
-            '"email":"deng@example.com"},"modules":['
+            '{"basics":{"name":"Candidate One","headline":"Backend Intern","phone":"2025.01-2025.03",'
+            '"email":"candidate.one@example.com"},"modules":['
             '{"type":"projects","content":{"items":[{"name":"TinyWebServer","role":"C++ Backend",'
             '"startDate":"2026.01","endDate":"2026.04","description":"Built an HTTP server.",'
             '"highlights":["Implemented epoll ET networking"]}]}},'
@@ -390,7 +415,7 @@ def test_existing_resume_parser_uses_llm_structured_extraction_before_rule_fallb
             "current_resume": resume,
             "collected_facts": {
                 "uploaded_resume_context": {
-                    "text": "NAME_REMOVED\nTinyWebServer 2026.01-2026.04\nC++ Docker"
+                    "text": "候选人甲\nTinyWebServer 2026.01-2026.04\nC++ Docker"
                 }
             },
             "workflow_logs": [],
@@ -401,9 +426,9 @@ def test_existing_resume_parser_uses_llm_structured_extraction_before_rule_fallb
     project_module = next(module for module in result["current_resume"]["modules"] if module["type"] == "projects")
     skills_module = next(module for module in result["current_resume"]["modules"] if module["type"] == "skills")
 
-    assert basics["name"] == "Deng Zixuan"
+    assert basics["name"] == "Candidate One"
     assert basics["headline"] == "Backend Intern"
-    assert basics["email"] == "deng@example.com"
+    assert basics["email"] == "candidate.one@example.com"
     assert basics["phone"] == ""
     assert project_module["content"]["items"][0]["name"] == "TinyWebServer"
     assert project_module["content"]["items"][0]["highlights"] == ["Implemented epoll ET networking"]
@@ -739,10 +764,10 @@ def test_import_existing_resume_service_parses_without_writer(monkeypatch):
                 "name": "resume.md",
                 "type": "existing_resume",
                 "raw_text": (
-                    "NAME_REMOVED\n"
+                    "候选人甲\n"
                     "实习生（base深圳）\n"
-                    "21岁 | 男 | 广东惠州\n"
-                    "EMAIL_REMOVED PHONE_REMOVED https://github.com/GITHUB_USER_REMOVED\n"
+                    "21岁 | 男 | 示例城市\n"
+                    "candidate@example.com +86 138 0000 0000 https://github.com/example-user\n"
                     "项目经历\n"
                     "TinyWebServer – 简单 HTTP 服务器（C++ 后端） 2026.01-2026.04\n"
                     "线程池：基于 mutex + condition_variable 的生产者-消费者模型。\n"
@@ -756,9 +781,9 @@ def test_import_existing_resume_service_parses_without_writer(monkeypatch):
     projects = next(module for module in result["final_resume"]["modules"] if module["type"] == "projects")
 
     assert agents == ["info_collector", "existing_resume_parser"]
-    assert basics["name"] == "NAME_REMOVED"
-    assert basics["city"] == "广东惠州"
-    assert basics["phone"] == "PHONE_REMOVED"
+    assert basics["name"] == "候选人甲"
+    assert basics["city"] == "示例城市"
+    assert basics["phone"] == "+86 138 0000 0000"
     assert projects["content"]["items"][0]["name"] == "TinyWebServer"
     assert result["parsed_resume_changes"]
 
@@ -867,3 +892,4 @@ def test_missing_api_key_path_still_returns_user_safe_local_resume(monkeypatch):
     assert skills_module["content"]["items"]
     assert self_eval_module["content"]["items"]
     assert result["collected_facts"]["has_jd"] is True
+

@@ -24,13 +24,17 @@ def create_resume_document(
     style = build_style_params(style_params or resume.get("style", {}))
     style.pop("preview_scale", None)
     resume["style"] = deepcopy(style)
+    saved_inputs = resume.get("inputs", {}) if isinstance(resume.get("inputs"), dict) else {}
+    resolved_jd_text = jd_text if jd_text else str(saved_inputs.get("jd_text", "") or "")
+    resolved_uploaded_files = uploaded_files if uploaded_files is not None else saved_inputs.get("uploaded_files", [])
 
     return {
         "resume": resume,
         "style": deepcopy(style),
         "inputs": {
-            "jd_text": jd_text,
-            "uploaded_files": deepcopy(uploaded_files or []),
+            **deepcopy(saved_inputs),
+            "jd_text": resolved_jd_text,
+            "uploaded_files": deepcopy(resolved_uploaded_files or []),
         },
         "runtime": {
             "preview_version": 0,
@@ -129,6 +133,9 @@ def _normalize_document_observer(session_state: MutableMapping[str, Any], event:
     document["inputs"]["uploaded_files"] = deepcopy(
         session_state.get("uploaded_files_meta", document["inputs"].get("uploaded_files", [])) or []
     )
+    for key in ["jd_source", "jd_url_input", "jd_ocr_text", "uploaded_readme_text", "existing_resume_name"]:
+        if key in session_state:
+            document["inputs"][key] = deepcopy(session_state.get(key, ""))
     document.setdefault("runtime", {})["preview_scale"] = int(
         session_state.get("preview_scale", document.get("runtime", {}).get("preview_scale", 100)) or 100
     )

@@ -13,6 +13,8 @@ MAX_RAW_TEXT_CHARS = 200_000
 TEXT_SUFFIXES = {".txt"}
 MARKDOWN_SUFFIXES = {".md", ".markdown"}
 PDF_SUFFIXES = {".pdf"}
+JSON_SUFFIXES = {".json"}
+DOCX_SUFFIXES = {".docx"}
 
 
 def classify_file_type(path: str | Path, declared_type: str | None = None) -> Dict[str, str]:
@@ -26,6 +28,10 @@ def classify_file_type(path: str | Path, declared_type: str | None = None) -> Di
         file_type = "text"
     elif suffix in PDF_SUFFIXES:
         file_type = "pdf"
+    elif suffix in JSON_SUFFIXES:
+        file_type = "json"
+    elif suffix in DOCX_SUFFIXES:
+        file_type = "docx"
     else:
         file_type = "unsupported"
 
@@ -35,7 +41,7 @@ def classify_file_type(path: str | Path, declared_type: str | None = None) -> Di
         classification = "project_readme"
     elif file_type == "pdf":
         classification = "pdf_document"
-    elif file_type in {"markdown", "text"}:
+    elif file_type in {"markdown", "text", "json", "docx"}:
         classification = "text_document"
     else:
         classification = "unsupported"
@@ -195,6 +201,34 @@ def _read_pdf_file(path: Path, metadata: Dict[str, Any]) -> Dict[str, Any]:
     return metadata
 
 
+def _read_docx_file(path: Path, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        from docx import Document  # type: ignore
+    except Exception:
+        metadata["parse_status"] = "metadata_only"
+        metadata["notes"].append("DOCX text extraction is unavailable because python-docx is not installed.")
+        return metadata
+
+    try:
+        document = Document(str(path))
+        text = "\n".join(paragraph.text for paragraph in document.paragraphs if paragraph.text.strip())
+    except Exception as exc:
+        metadata["parse_status"] = "metadata_only"
+        metadata["notes"].append(f"DOCX parser could not extract text: {exc}")
+        return metadata
+
+    if len(text) > MAX_RAW_TEXT_CHARS:
+        text = text[:MAX_RAW_TEXT_CHARS]
+        metadata["notes"].append(f"DOCX text truncated to {MAX_RAW_TEXT_CHARS} characters.")
+
+    metadata["raw_text"] = text
+    metadata["parse_status"] = "parsed" if text else "metadata_only"
+    if not text:
+        metadata["notes"].append("DOCX parser was available but no text was extracted.")
+    metadata["metadata"].update({"text_stats": _text_stats(text)})
+    return metadata
+
+
 def parse_uploaded_file(file_path: str | Path, declared_type: str | None = None) -> Dict[str, Any]:
     """Parse an uploaded user file into safe metadata and optional raw text."""
     path = ensure_workspace_path(file_path)
@@ -209,11 +243,14 @@ def parse_uploaded_file(file_path: str | Path, declared_type: str | None = None)
         return metadata
 
     suffix = metadata["suffix"]
-    if suffix in TEXT_SUFFIXES | MARKDOWN_SUFFIXES:
+    if suffix in TEXT_SUFFIXES | MARKDOWN_SUFFIXES | JSON_SUFFIXES:
         return _read_text_file(path, metadata)
 
     if suffix in PDF_SUFFIXES:
         return _read_pdf_file(path, metadata)
+
+    if suffix in DOCX_SUFFIXES:
+        return _read_docx_file(path, metadata)
 
     metadata["parse_status"] = "unsupported"
     metadata["notes"].append("Unsupported file type for content parsing.")

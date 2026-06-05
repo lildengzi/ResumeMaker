@@ -75,6 +75,10 @@ class ResumeWriterAgent(BaseResumeAgent):
         if not isinstance(uploaded_context, dict):
             uploaded_context = {}
         uploaded_resume_text = str(uploaded_context.get("text", "") or "").strip()
+        supplemental_context = facts.get("supplemental_context", {})
+        if not isinstance(supplemental_context, dict):
+            supplemental_context = {}
+        supplemental_text = str(supplemental_context.get("text", "") or "").strip()
         optimization_goal = str(facts.get("optimization_goal", "") or "").strip()
 
         if jd_text:
@@ -89,6 +93,13 @@ class ResumeWriterAgent(BaseResumeAgent):
                 "do not invent information that is not present:\n"
                 f"{uploaded_resume_text}\n\n"
             )
+        supplemental_section = ""
+        if supplemental_text:
+            supplemental_section = (
+                "Supplemental candidate materials. These may include project notes, teaching cases, grades, "
+                "certificates, portfolio notes, or parent/student-facing evidence. Use them only as factual context:\n"
+                f"{supplemental_text}\n\n"
+            )
 
         return (
             f"{prompt_config.get('resume_writer_system', 'You are a senior Chinese resume optimization expert.')}\n\n"
@@ -96,16 +107,30 @@ class ResumeWriterAgent(BaseResumeAgent):
             "Hard JSON boundary: return one valid JSON object only. The object may contain only top-level keys "
             "basics, modules, style, and conditional_suggestions. Editable resume content is limited to modules. "
             "Do not change factual anchors: name, contact details, photo, style, school, company, project name, "
-            "organization, role, or dates. Do not add nonexistent experience items or modules. Custom modules must "
-            "keep their fields structure.\n\n"
+            "organization, course/subject names, role, or dates when they are real evidence in the resume. Education "
+            "facts are hard anchors. For skills, projects, companyExperience, campusExperience, selfEvaluation, and "
+            "custom modules, you may rewrite, hide, clear, reorder, or replace items when the current content is "
+            "irrelevant to the target scenario. Do not add nonexistent facts or modules.\n\n"
             f"Optimization mode: {optimization_goal or ('jd_targeted' if jd_text else 'general_resume_polish')}\n"
             "If uploaded resume text is provided, first use real experiences, skills, and outcomes from that text. "
             "If no JD is provided, polish the existing resume generally. If a JD is provided, strengthen only real "
-            "experience that matches the JD.\n\n"
+            "experience that matches the JD or target communication scenario. This resume may target technical roles, "
+            "tutoring, internships, campus work, competitions, admissions, or other candidate-introduction scenarios.\n\n"
+            "Audience fit contract:\n"
+            "1. Choose what the reader cares about. For parents hiring a tutor, prioritize subject competence, exam or "
+            "course performance if provided, teaching method, ability to keep a child focused, patience, responsibility, "
+            "communication with parents, availability fit, and trial-class readiness.\n"
+            "2. Remove or hide irrelevant technical implementation details when the reader is not evaluating technical ability.\n"
+            "3. For tutoring/parent-facing scenarios, set technical projects to visible=false or clear their items unless "
+            "they are real tutoring/teaching cases. Do not keep long technical project sections just to prove explanation ability.\n"
+            "4. Translate real technical/campus/project experience into broadly understandable strengths only when relevant: "
+            "clear explanation, planning, responsibility, communication, persistence, and structured problem solving.\n\n"
             "STAR rewrite contract:\n"
-            "1. For projects, companyExperience, and campusExperience, rewrite editable description/highlights with "
-            "STAR: Situation/Task context, Action owned by the candidate, and Result/impact.\n"
-            "2. Do not invent metrics, users, rankings, revenue, awards, deployment facts, or business outcomes.\n"
+            "1. For projects, companyExperience, campusExperience, tutoring/teaching cases, and custom evidence modules, "
+            "rewrite editable description/highlights with STAR or evidence-first structure: context, action owned by "
+            "the candidate, and result/impact.\n"
+            "2. Do not invent metrics, exam scores, rankings, revenue, awards, teaching outcomes, deployment facts, "
+            "or business outcomes.\n"
             "3. If a stronger STAR rewrite needs missing facts, put short questions in top-level "
             "conditional_suggestions instead of fabricating them.\n"
             "4. conditional_suggestions must be a string array. These suggestions are shown below the preview only "
@@ -117,6 +142,7 @@ class ResumeWriterAgent(BaseResumeAgent):
             "- If the submit tool rejects your JSON, the workflow rolls back to the original snapshot.\n\n"
             f"{jd_instruction}\n\n"
             f"{uploaded_resume_section}"
+            f"{supplemental_section}"
             f"Current resume JSON:\n{json.dumps(current_resume, ensure_ascii=False, indent=2)}\n\n"
             "Return JSON only."
         ).strip()

@@ -76,7 +76,9 @@ def replace_resume_from_agent(document: Dict[str, Any], optimized_resume: Dict[s
 
 def save_document_snapshot(document: Dict[str, Any]) -> Dict[str, Any]:
     mark_dirty(document, False)
-    return ensure_resume_shape(document.get("resume", {}))
+    snapshot = ensure_resume_shape(document.get("resume", {}))
+    snapshot["inputs"] = deepcopy(document.get("inputs", {}))
+    return snapshot
 
 
 def _renumber_modules(modules: List[Dict[str, Any]]) -> None:

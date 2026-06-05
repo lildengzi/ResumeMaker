@@ -1,0 +1,29 @@
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+ResumeMaker/.env
+ResumeMaker/.env.*
+!ResumeMaker/.env.example
+
+# Local runtime data and private candidate materials
+ResumeMaker/data/resume_data.json
+ResumeMaker/data/app.db
+ResumeMaker/data/*.db
+ResumeMaker/data/*.sqlite
+ResumeMaker/data/*.sqlite3
+ResumeMaker/data/logs/
+ResumeMaker/data/uploads/
+data/
+description.md
+resume_data.json
+
+# Generated Python/cache artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local editor/tool output
+.VSCodeCounter/
+*.sublime-workspace

@@ -26,6 +26,7 @@ class InfoCollectorAgent(BaseResumeAgent):
         uploaded_files = next_state.get("uploaded_files", []) or []
         normalized_files = self._normalize_uploaded_files(uploaded_files)
         uploaded_resume_context = self._collect_uploaded_resume_context(normalized_files)
+        supplemental_context = self._collect_supplemental_context(normalized_files)
 
         basics = current_resume.get("basics", {})
         collected_facts = {
@@ -36,6 +37,7 @@ class InfoCollectorAgent(BaseResumeAgent):
             "optimization_goal": "jd_targeted" if jd_text else "general_resume_polish",
             "uploaded_files": normalized_files,
             "uploaded_resume_context": uploaded_resume_context,
+            "supplemental_context": supplemental_context,
             "sections_summary": self._summarize_sections(current_resume),
         }
 
@@ -132,6 +134,36 @@ class InfoCollectorAgent(BaseResumeAgent):
                     continue
                 clipped = raw_text[:remaining]
                 text_parts.append(f"文件：{file_meta.get('name', '')}\n{clipped}")
+
+        return {
+            "files": parsed_files,
+            "text": "\n\n".join(text_parts).strip(),
+        }
+
+    @staticmethod
+    def _collect_supplemental_context(uploaded_files: List[Dict[str, str]]) -> Dict[str, Any]:
+        parsed_files: List[Dict[str, str]] = []
+        text_parts: List[str] = []
+
+        for file_meta in uploaded_files:
+            if file_meta.get("type") == "existing_resume":
+                continue
+
+            raw_text = str(file_meta.get("raw_text", "") or "").strip()
+            if not raw_text:
+                continue
+
+            entry = {
+                "name": file_meta.get("name", ""),
+                "type": file_meta.get("type", ""),
+                "has_text": True,
+            }
+            parsed_files.append(entry)
+
+            remaining = MAX_CONTEXT_TEXT_CHARS - sum(len(part) for part in text_parts)
+            if remaining <= 0:
+                continue
+            text_parts.append(f"文件：{file_meta.get('name', '')}\n{raw_text[:remaining]}")
 
         return {
             "files": parsed_files,
