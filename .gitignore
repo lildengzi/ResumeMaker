@@ -18,6 +18,9 @@ data/
 description.md
 resume_data.json
 
+# Config with potential secrets
+ResumeMaker/config.json
+
 # Generated Python/cache artifacts
 __pycache__/
 *.py[cod]
@@ -27,3 +30,13 @@ __pycache__/
 # Local editor/tool output
 .VSCodeCounter/
 *.sublime-workspace
+*.sublime-project
+
+# Extra directories
+ResumeMakerPlus/
+
+# Root legacy files (moved into ResumeMaker/)
+generate_resume_pdf.py
+resume_builder_app.py
+smart_resume_core.py
+tools/

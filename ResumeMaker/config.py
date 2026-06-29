@@ -265,6 +265,27 @@ def update_resume_style_config(
     return config
 
 
+def update_llm_config(
+    llm_updates: Dict[str, Any],
+    config_path: Path = DEFAULT_CONFIG_PATH,
+) -> Dict[str, Any]:
+    config = load_app_config(config_path)
+    config.setdefault("llm", {})
+    llm_config = config["llm"]
+
+    for key in ("api_key", "base_url", "model"):
+        if key not in llm_updates:
+            continue
+        value = str(llm_updates.get(key, "") or "").strip()
+        llm_config[key] = value or (None if key == "base_url" else "")
+
+    save_app_config(config, config_path)
+
+    global APP_CONFIG
+    APP_CONFIG = config
+    return config
+
+
 def get_path_from_storage(key: str) -> Path:
     storage_config = APP_CONFIG["storage"]
     return BASE_DIR / storage_config[key]

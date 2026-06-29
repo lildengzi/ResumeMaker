@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import streamlit as st
 
+from config import load_app_config, update_llm_config
 from renderers import DEFAULT_STYLE_PARAMS, build_style_params, get_template_label, get_template_options
 from tools.file_tools import parse_uploaded_file
 from tools.ocr_tool import extract_jd_text_from_image
@@ -54,6 +55,45 @@ def get_current_style_params() -> Dict[str, Any]:
     style_params = dict(st.session_state.style_params)
     style_params["preview_scale"] = int(st.session_state.get("preview_scale", 100))
     return build_style_params(style_params)
+
+
+def render_llm_config_controls() -> Dict[str, Any]:
+    llm_config = load_app_config().get("llm", {})
+
+    with st.expander(t("llm.section"), expanded=False):
+        st.caption(t("llm.caption"))
+        api_key = st.text_input(
+            t("llm.api_key"),
+            value=str(llm_config.get("api_key", "") or ""),
+            type="password",
+            key="llm_api_key_input",
+            placeholder=t("llm.api_key_placeholder"),
+        )
+        base_url = st.text_input(
+            t("llm.base_url"),
+            value=str(llm_config.get("base_url", "") or ""),
+            key="llm_base_url_input",
+            placeholder=t("llm.base_url_placeholder"),
+        )
+        model = st.text_input(
+            t("llm.model"),
+            value=str(llm_config.get("model", "") or "gpt-4o-mini"),
+            key="llm_model_input",
+            placeholder=t("llm.model_placeholder"),
+        )
+
+        if st.button(t("llm.save"), key="save_llm_config_btn", use_container_width=True):
+            updated_config = update_llm_config(
+                {
+                    "api_key": api_key,
+                    "base_url": base_url,
+                    "model": model,
+                }
+            )
+            st.success(t("llm.saved"))
+            return updated_config.get("llm", {})
+
+    return llm_config
 
 
 def _sync_style_widgets_from_state(force: bool = False) -> None:

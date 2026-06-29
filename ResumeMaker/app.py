@@ -41,6 +41,7 @@ from ui.sidebar import (
     ensure_style_state,
     get_current_style_params,
     render_jd_controls,
+    render_llm_config_controls,
     render_material_controls,
     render_style_controls,
 )
@@ -896,6 +897,7 @@ def render_sidebar() -> None:
             st.info(st.session_state.last_optimization_notice)
             st.session_state.last_optimization_notice = ""
 
+        render_llm_config_controls()
         render_style_controls()
         render_basics_editor()
         render_modules_editor()
