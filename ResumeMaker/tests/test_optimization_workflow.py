@@ -156,6 +156,8 @@ def test_resume_writer_prompt_includes_jd_and_uploaded_resume_context():
     assert "Existing resume mentions FastAPI" in prompt
     assert "Optimization mode: jd_targeted" in prompt
     assert "STAR rewrite contract" in prompt
+    assert "Skills tag contract" in prompt
+    assert "content.items must be short tag phrases, not full sentences" in prompt
     assert "conditional_suggestions" in prompt
     skills_module = next(module for module in result["final_resume"]["modules"] if module["type"] == "skills")
     assert skills_module["content"]["items"] == ["Python", "FastAPI"]

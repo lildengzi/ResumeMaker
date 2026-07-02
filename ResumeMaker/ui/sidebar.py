@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from uuid import uuid4
@@ -10,6 +12,7 @@ from config import load_app_config, update_llm_config
 from renderers import DEFAULT_STYLE_PARAMS, build_style_params, get_template_label, get_template_options
 from tools.file_tools import parse_uploaded_file
 from tools.ocr_tool import extract_jd_text_from_image
+from tools.permission import ensure_workspace_path
 from tools.web_tool import fetch_jd_from_url
 from ui.i18n import t
 
@@ -203,6 +206,31 @@ def _save_uploaded_file(upload_dir: Path, uploaded_file, target_prefix: str) -> 
     return str(target_path)
 
 
+def _uploaded_file_bytes(uploaded_file) -> bytes:
+    return bytes(uploaded_file.getvalue())
+
+
+def _file_fingerprint(name: str, data: bytes) -> str:
+    digest = hashlib.sha256(data).hexdigest()
+    return f"{Path(name).name.lower()}:{len(data)}:{digest}"
+
+
+def _material_fingerprint(file_meta: Dict[str, Any]) -> str:
+    stored = str(file_meta.get("fingerprint", "") or "").strip()
+    if stored:
+        return stored
+    name = str(file_meta.get("original_name") or file_meta.get("name") or file_meta.get("file_name") or "")
+    try:
+        path = ensure_workspace_path(str(file_meta.get("path", "") or ""))
+    except ValueError:
+        path = None
+    if path is not None and path.is_file():
+        return _file_fingerprint(name or path.name, path.read_bytes())
+    raw_text = str(file_meta.get("raw_text", "") or "")
+    size = int(file_meta.get("size_bytes", 0) or 0)
+    return f"{Path(name).name.lower()}:{size}:{hashlib.sha256(raw_text.encode('utf-8')).hexdigest()}"
+
+
 def _apply_jd_ocr_result(image_bytes: bytes, existing_text: str = "") -> Tuple[str, str, bool]:
     result = extract_jd_text_from_image(image_bytes)
     if result.ok:
@@ -242,11 +270,25 @@ def _parse_saved_upload(file_path: str, original_name: str, file_role: str) -> D
 
 
 def _material_files() -> List[Dict[str, Any]]:
-    return [
-        file_meta
-        for file_meta in st.session_state.get("uploaded_files_meta", [])
-        if isinstance(file_meta, dict) and file_meta.get("type") == "readme"
-    ]
+    materials: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    changed = False
+
+    for file_meta in st.session_state.get("uploaded_files_meta", []):
+        if not isinstance(file_meta, dict) or file_meta.get("type") != "readme":
+            continue
+        fingerprint = _material_fingerprint(file_meta)
+        file_meta["fingerprint"] = fingerprint
+        if fingerprint in seen:
+            changed = True
+            continue
+        seen.add(fingerprint)
+        materials.append(file_meta)
+
+    if changed:
+        _persist_material_files(materials)
+
+    return materials
 
 
 def _non_material_files() -> List[Dict[str, Any]]:
@@ -258,7 +300,12 @@ def _non_material_files() -> List[Dict[str, Any]]:
 
 
 def _persist_material_files(materials: List[Dict[str, Any]]) -> None:
-    st.session_state.uploaded_files_meta = _non_material_files() + materials
+    uploaded_files = _non_material_files() + materials
+    st.session_state.uploaded_files_meta = uploaded_files
+
+    document = st.session_state.get("resume_document")
+    if isinstance(document, dict):
+        document.setdefault("inputs", {})["uploaded_files"] = deepcopy(uploaded_files)
 
 
 def render_jd_controls(upload_dir: Path) -> str:
@@ -360,16 +407,25 @@ def render_material_controls(upload_dir: Path) -> List[Dict[str, Any]]:
             key="readme_uploader",
         )
         if uploaded_readme is not None:
-            file_path = _save_uploaded_file(upload_dir, uploaded_readme, "candidate_material")
-            parsed_readme = _parse_saved_upload(file_path, uploaded_readme.name, "readme")
-            parsed_readme.setdefault("material_category", "project")
-            parsed_readme.setdefault("material_title", Path(uploaded_readme.name).stem)
-            st.session_state.uploaded_readme_text = parsed_readme.get("raw_text", "")
+            uploaded_bytes = _uploaded_file_bytes(uploaded_readme)
+            fingerprint = _file_fingerprint(uploaded_readme.name, uploaded_bytes)
             materials = _material_files()
-            if not any(item.get("path") == parsed_readme.get("path") for item in materials):
+            existing_material = next(
+                (item for item in materials if _material_fingerprint(item) == fingerprint),
+                None,
+            )
+            if existing_material is None:
+                file_path = _save_uploaded_file(upload_dir, uploaded_readme, "candidate_material")
+                parsed_readme = _parse_saved_upload(file_path, uploaded_readme.name, "readme")
+                parsed_readme["fingerprint"] = fingerprint
+                parsed_readme.setdefault("material_category", "project")
+                parsed_readme.setdefault("material_title", Path(uploaded_readme.name).stem)
+                st.session_state.uploaded_readme_text = parsed_readme.get("raw_text", "")
                 materials.append(parsed_readme)
                 _persist_material_files(materials)
-            st.success(t("file.readme_uploaded"))
+                st.success(t("file.readme_uploaded"))
+            else:
+                st.session_state.uploaded_readme_text = existing_material.get("raw_text", "")
 
         materials = _material_files()
         if not materials:

@@ -201,17 +201,18 @@ def load_app_config(config_path: Path = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
     timeout_env = llm_config.get("timeout_env", "LLM_TIMEOUT")
     max_retries_env = llm_config.get("max_retries_env", "LLM_MAX_RETRIES")
 
-    if os.getenv(api_key_env):
-        llm_config["api_key"] = os.getenv(api_key_env, "").strip()
-    else:
-        llm_config["api_key"] = llm_config.get("api_key", "")
+    configured_api_key = str(llm_config.get("api_key", "") or "").strip()
+    env_api_key = str(os.getenv(api_key_env, "") or "").strip()
+    llm_config["api_key"] = configured_api_key or env_api_key
 
-    base_url = os.getenv(base_url_env)
-    llm_config["base_url"] = base_url.strip() if base_url else llm_config.get("base_url")
+    configured_base_url = str(llm_config.get("base_url", "") or "").strip()
+    env_base_url = str(os.getenv(base_url_env, "") or "").strip()
+    llm_config["base_url"] = configured_base_url or (env_base_url or None)
 
-    model = os.getenv(model_env)
-    if model:
-        llm_config["model"] = model.strip()
+    configured_model = str(llm_config.get("model", "") or "").strip()
+    env_model = str(os.getenv(model_env, "") or "").strip()
+    if configured_model or env_model:
+        llm_config["model"] = configured_model or env_model
 
     temperature = os.getenv(temperature_env)
     if temperature:

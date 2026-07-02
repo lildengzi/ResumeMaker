@@ -1,6 +1,6 @@
 import json
 
-from config import update_llm_config
+from config import load_app_config, update_llm_config
 from core import llm as llm_module
 
 
@@ -69,3 +69,29 @@ def test_update_llm_config_persists_user_inputs(tmp_path, monkeypatch):
     assert saved["llm"]["api_key"] == "test-key"
     assert saved["llm"]["base_url"] == "https://example.com/v1"
     assert saved["llm"]["model"] == "test-model"
+
+
+def test_saved_llm_config_takes_precedence_over_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://env.example.com/v1")
+    monkeypatch.setenv("LLM_MODEL", "env-model")
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "llm": {
+                    "api_key": "saved-key",
+                    "base_url": "https://saved.example.com/v1",
+                    "model": "saved-model",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    llm_config = load_app_config(config_path)["llm"]
+
+    assert llm_config["api_key"] == "saved-key"
+    assert llm_config["base_url"] == "https://saved.example.com/v1"
+    assert llm_config["model"] == "saved-model"
