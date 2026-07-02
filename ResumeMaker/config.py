@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_CONFIG_PATH = BASE_DIR / "config.json"
+DEFAULT_CONFIG_PATH = Path(os.getenv("RESUMEMAKER_CONFIG_PATH", BASE_DIR / "config.json"))
 DEFAULT_ENV_PATH = BASE_DIR / ".env"
 
 if "PYTEST_VERSION" not in os.environ:
@@ -242,6 +242,7 @@ APP_CONFIG = load_app_config()
 
 
 def save_app_config(config: Dict[str, Any], config_path: Path = DEFAULT_CONFIG_PATH) -> None:
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     with config_path.open("w", encoding="utf-8") as file:
         json.dump(config, file, ensure_ascii=False, indent=2)
 

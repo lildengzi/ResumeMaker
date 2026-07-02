@@ -71,6 +71,27 @@ def test_update_llm_config_persists_user_inputs(tmp_path, monkeypatch):
     assert saved["llm"]["model"] == "test-model"
 
 
+def test_update_llm_config_creates_config_parent_directory(tmp_path, monkeypatch):
+    for env_name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "LLM_MODEL"):
+        monkeypatch.delenv(env_name, raising=False)
+
+    config_path = tmp_path / "data" / "config.json"
+
+    update_llm_config(
+        {
+            "api_key": "saved-from-ui",
+            "base_url": "",
+            "model": "ui-model",
+        },
+        config_path=config_path,
+    )
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["llm"]["api_key"] == "saved-from-ui"
+    assert saved["llm"]["base_url"] is None
+    assert saved["llm"]["model"] == "ui-model"
+
+
 def test_saved_llm_config_takes_precedence_over_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "env-key")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://env.example.com/v1")

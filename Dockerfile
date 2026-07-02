@@ -3,6 +3,7 @@ FROM mcr.microsoft.com/playwright/python:v1.61.0-noble
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
+    RESUMEMAKER_CONFIG_PATH=/app/ResumeMaker/data/config.json \
     STREAMLIT_SERVER_HEADLESS=true \
     STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
     STREAMLIT_SERVER_PORT=8501

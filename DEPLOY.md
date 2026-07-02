@@ -15,7 +15,13 @@ mkdir -p /opt/resumemaker/data
 cd /opt/resumemaker
 ```
 
-Create `.env`:
+You can configure the model in the app sidebar after the container starts. The saved model settings are written to:
+
+```text
+/opt/resumemaker/data/config.json
+```
+
+Optionally create `.env` if you prefer environment variables:
 
 ```env
 OPENAI_API_KEY=your_api_key_here
@@ -36,8 +42,11 @@ services:
     restart: unless-stopped
     ports:
       - "8501:8501"
+    environment:
+      RESUMEMAKER_CONFIG_PATH: /app/ResumeMaker/data/config.json
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - ./data:/app/ResumeMaker/data
 ```
@@ -68,10 +77,10 @@ docker compose up -d
 
 The image does not include local data, uploaded materials, logs, `.env`, or `config.json`.
 
-Runtime data is stored in:
+Runtime data and sidebar-saved model settings are stored in:
 
 ```text
 /opt/resumemaker/data
 ```
 
-Keep `.env` only on the server.
+Keep `.env` only on the server if you use one.

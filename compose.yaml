@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "8501:8501"
+    environment:
+      RESUMEMAKER_CONFIG_PATH: /app/ResumeMaker/data/config.json
     env_file:
       - path: .env
         required: false
