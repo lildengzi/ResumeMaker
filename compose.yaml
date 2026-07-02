@@ -1,0 +1,12 @@
+services:
+  resumemaker:
+    image: ghcr.io/lildengzi/resumemaker:latest
+    container_name: resumemaker
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./data:/app/ResumeMaker/data
