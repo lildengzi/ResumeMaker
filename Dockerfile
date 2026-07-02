@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM mcr.microsoft.com/playwright/python:v1.61.0-noble
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -11,8 +11,7 @@ WORKDIR /app
 
 COPY ResumeMaker/requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip \
-    && pip install -r /app/requirements.txt \
-    && python -m playwright install --with-deps chromium
+    && pip install -r /app/requirements.txt
 
 COPY ResumeMaker /app/ResumeMaker
 
